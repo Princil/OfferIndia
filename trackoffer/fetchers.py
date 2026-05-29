@@ -855,6 +855,18 @@ try:
 except Exception:
     _HAS_PLAYWRIGHT = False
 
+# Auto-install Chromium browser binary (needed for Streamlit Cloud / fresh installs)
+if _HAS_PLAYWRIGHT:
+    try:
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True, text=True, timeout=300,
+        )
+    except Exception:
+        pass  # Browser may already be installed or install will happen on first use
+
 
 class PlaywrightScraperFetcher(ProductFetcher):
     """Headless browser scraper using Playwright. Handles JS-rendered pages."""
