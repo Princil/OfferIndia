@@ -43,7 +43,27 @@ try:
 except Exception:
     pass
 
-st.set_page_config(page_title="TrackOffer India", page_icon="🔥", layout="wide")
+st.set_page_config(
+    page_title="TrackOffer India",
+    page_icon="🔥",
+    layout="wide",
+    menu_items={
+        "Get help": None,
+        "Report a bug": None,
+        "About": None,
+    },
+)
+
+# Hide Streamlit toolbar (GitHub, edit, share icons)
+st.markdown(
+    """
+    <style>
+        .stAppHeader { display: none !important; }
+        header[data-testid="stHeader"] { display: none !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ─── Sidebar: config ──────────────────────────────────────────────
 st.sidebar.title("⚙️ Configuration")
