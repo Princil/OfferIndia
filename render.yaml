@@ -1,0 +1,19 @@
+# Render Blueprint for TrackOffer India
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: trackoffer
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: STREAMLIT_SERVER_PORT
+        value: "10000"
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: "0.0.0.0"
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: "true"
+      # Set your secrets in Render Dashboard after deploy:
+      # GOOGLE_API_KEY, GOOGLE_CX, AMAZON_AFFILIATE_TAG, OPENAI_API_KEY, etc.
