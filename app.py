@@ -48,7 +48,7 @@ st.set_page_config(page_title="TrackOffer India", page_icon="🔥", layout="wide
 # ─── Sidebar: config ──────────────────────────────────────────────
 st.sidebar.title("⚙️ Configuration")
 # Map env -> UI labels and default index
-_source_env = os.getenv("DATA_SOURCE", "mock").lower()
+_source_env = os.getenv("DATA_SOURCE", "free").lower()
 _SOURCE_OPTIONS = ["Mock (demo)", "Free (Google + PA-API)", "RapidAPI (paid)"]
 _SOURCE_MAP = {
     "mock": "Mock (demo)",
