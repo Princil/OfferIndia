@@ -636,9 +636,8 @@ class AmazonScraperFetcher(ProductFetcher):
                     link_tag = item.find("a", class_="a-link-normal")
                     href = link_tag.get("href", "") if link_tag else ""
                     if href:
-    href = _extract_amazon_real_url(href, self.base_url)
-href = _add_amazon_affiliate(href)
-
+                        href = _extract_amazon_real_url(href, self.base_url)
+                    href = _add_amazon_affiliate(href)
                     title_tag = item.find("span", class_="a-text-normal") or item.find("h2")
                     title = title_tag.get_text(strip=True) if title_tag else ""
 
