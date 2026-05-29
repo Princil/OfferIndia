@@ -67,10 +67,14 @@ st.markdown(
 
 # ─── Data source (internal, not shown to user) ───────────────────
 os.environ["DATA_SOURCE"] = os.getenv("DATA_SOURCE", "free").lower()
-
-llm_key = os.getenv("OPENAI_API_KEY")
-if not llm_key:
-    st.sidebar.info("LLM ranking / NLQ disabled.")
+st.markdown(
+    """
+    <style>
+        section[data-testid="stSidebar"] { display: none !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ─── Header ─────────────────────────────────────────────────────
 st.title("🔥 TrackOffer India")
