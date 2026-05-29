@@ -19,16 +19,6 @@ except Exception:
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────
-def _add_amazon_affiliate(url: str) -> str:
-    """Append Amazon affiliate tracking tag to product URLs."""
-    if not url or "amazon.in" not in url:
-        return url
-    tag = os.getenv("AMAZON_AFFILIATE_TAG", "").strip()
-    if not tag:
-        return url
-    separator = "&" if "?" in url else "?"
-    return f"{url}{separator}tag={tag}"
-
 def _extract_amazon_real_url(href: str, base_url: str = "https://www.amazon.in") -> str:
     """Extract real product URL from Amazon redirect/click-tracking links."""
     if not href:
@@ -47,6 +37,18 @@ def _extract_amazon_real_url(href: str, base_url: str = "https://www.amazon.in")
     if href.startswith("http"):
         return href
     return base_url + href
+
+
+def _add_amazon_affiliate(url: str) -> str:
+    """Append Amazon affiliate tracking tag to product URLs."""
+    if not url or "amazon.in" not in url:
+        return url
+    tag = os.getenv("AMAZON_AFFILIATE_TAG", "").strip()
+    if not tag:
+        return url
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}tag={tag}"
+
 
 # ─── Constants ──────────────────────────────────────────────────────────
 MOCK_CATEGORIES = [
@@ -317,6 +319,11 @@ class GoogleCustomSearchFetcher(ProductFetcher):
         "amazon": "amazon.in",
         "flipkart": "flipkart.com",
         "myntra": "myntra.com",
+        "ajio": "ajio.com",
+        "tatacliq": "tatacliq.com",
+        "nykaa": "nykaafashion.com",
+        "meesho": "meesho.com",
+        "snapdeal": "snapdeal.com",
     }
 
     def search(self, q: SearchQuery) -> List[Product]:
@@ -638,6 +645,7 @@ class AmazonScraperFetcher(ProductFetcher):
                     if href:
                         href = _extract_amazon_real_url(href, self.base_url)
                     href = _add_amazon_affiliate(href)
+
                     title_tag = item.find("span", class_="a-text-normal") or item.find("h2")
                     title = title_tag.get_text(strip=True) if title_tag else ""
 
@@ -979,7 +987,14 @@ class PlaywrightScraperFetcher(ProductFetcher):
 
         results: list[Product] = []
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-http2",
+                    "--disable-features=NetworkService,NetworkServiceInProcess",
+                    "--disable-blink-features=AutomationControlled",
+                ],
+            )
             kw = quote_plus(q.keywords)
 
             # Amazon - separate page to avoid cross-site contamination
@@ -1124,6 +1139,273 @@ class PlaywrightScraperFetcher(ProductFetcher):
                     print(f"[Playwright myntra] error: {e}")
                 ctx.close()
 
+            # Ajio
+            if "ajio" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    results.extend(self._scrape_site(
+                        page,
+                        f"https://www.ajio.com/search/?text={kw}",
+                        {
+                            "base_url": "https://www.ajio.com",
+                            "container": ".item.rilrtl-products-list__item, .product",
+                            "alt_containers": [".rilrtl-products-list__item", ".plp-product-card"],
+                            "title": ".name, .nameCls, h2",
+                            "link": "a",
+                            "price": ".price, .orginal-price, .discounted-price",
+                            "mrp": ".orginal-price, .striked-price, .line-through",
+                            "image": "img",
+                        },
+                        "ajio",
+                        q,
+                    ))
+                except Exception as e:
+                    print(f"[Playwright ajio] error: {e}")
+                ctx.close()
+
+            # Tata CLiQ
+            if "tatacliq" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    page.goto(f"https://www.tatacliq.com/search/?searchCategory=all&text={kw}", wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(5000)
+                    items = page.query_selector_all(".ProductModule__base")
+                    for item in items[:12]:
+                        try:
+                            desc_el = item.query_selector(".ProductDescription__base")
+                            if not desc_el:
+                                continue
+                            text = desc_el.inner_text().strip()
+
+                            # Extract prices from text (e.g., "BrandTitle₹1499" or "Title₹1724₹249931%")
+                            prices = re.findall(r'[₹]\s*([\d,]+)', text)
+                            if len(prices) >= 2:
+                                price = float(prices[0].replace(",", ""))
+                                # Second price may be MRP + discount% concatenated (e.g., "249931" = 2499 + 31%)
+                                mrp_str = prices[1].replace(",", "")
+                                mrp_val = float(mrp_str)
+                                if mrp_val > price * 10:
+                                    # Find split where left part is a reasonable MRP (> price)
+                                    for i in range(1, len(mrp_str)):
+                                        left = float(mrp_str[:i])
+                                        if left > price:
+                                            mrp = left
+                                            break
+                                    else:
+                                        mrp = mrp_val
+                                else:
+                                    mrp = mrp_val
+                            elif len(prices) == 1:
+                                price = float(prices[0].replace(",", ""))
+                                mrp = price * 1.5
+                            else:
+                                continue
+
+                            # Title is everything before first ₹
+                            title_match = re.match(r'^(.*?)(?:[₹])', text)
+                            title = title_match.group(1).strip() if title_match else text
+
+                            # Link
+                            link_el = item.query_selector("a")
+                            href = link_el.get_attribute("href") if link_el else ""
+                            if href and not href.startswith("http"):
+                                href = "https://www.tatacliq.com" + href
+
+                            # Image - skip icons and empty placeholders
+                            img = ""
+                            for img_candidate in item.query_selector_all("img"):
+                                src = img_candidate.get_attribute("src") or img_candidate.get_attribute("data-src") or ""
+                                # Skip non-product images (icons, stars, empty placeholders)
+                                if not src or "star" in src.lower() or "icon" in src.lower() or "placeholder" in src.lower():
+                                    continue
+                                if src.startswith("//img.tatacliq.com"):
+                                    img = "https:" + src
+                                    break
+                                elif src.startswith("//"):
+                                    img = "https:" + src
+                                    break
+                                elif src.startswith("http"):
+                                    img = src
+                                    break
+                                elif src.startswith("/") and "." in src.split("/")[-1]:
+                                    # Relative product image path
+                                    img = "https://www.tatacliq.com" + src
+                                    break
+
+                            if not mrp or mrp < price:
+                                mrp = price * 1.5 if price else 999
+
+                            if title and href and price > 0:
+                                p = Product(
+                                    source="tatacliq",
+                                    title=title,
+                                    url=href,
+                                    image=img,
+                                    price=price,
+                                    mrp=mrp,
+                                    rating=None,
+                                    reviews=None,
+                                    category=q.category,
+                                    brand=None,
+                                )
+                                if p.discount_pct >= q.min_discount:
+                                    results.append(p)
+                        except Exception:
+                            continue
+                except Exception as e:
+                    print(f"[Playwright tatacliq] error: {e}")
+                ctx.close()
+
+            # Nykaa Fashion
+            if "nykaa" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    results.extend(self._scrape_site(
+                        page,
+                        f"https://www.nykaafashion.com/search/?q={kw}",
+                        {
+                            "base_url": "https://www.nykaafashion.com",
+                            "container": ".productWrapper, .product-wrapper, .css-1rd7evk",
+                            "alt_containers": [".css-1rd7evk", ".product-base"],
+                            "title": ".css-xrzmfa, .product-title, h3",
+                            "link": "a",
+                            "price": ".css-1jczs19, .price, .discounted-price",
+                            "mrp": ".css-17x46, .mrp, .striked-price",
+                            "image": "img",
+                        },
+                        "nykaa",
+                        q,
+                    ))
+                except Exception as e:
+                    print(f"[Playwright nykaa] error: {e}")
+                ctx.close()
+
+            # Meesho
+            if "meesho" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    results.extend(self._scrape_site(
+                        page,
+                        f"https://www.meesho.com/search?q={kw}",
+                        {
+                            "base_url": "https://www.meesho.com",
+                            "container": ".NewProductCard, .ProductList__GridCol, .product-card",
+                            "alt_containers": [".product-card", ".ProductCard"],
+                            "title": ".ProductCard__Title, h4, .product-title",
+                            "link": "a",
+                            "price": ".ProductCard__Price, .price, .discounted-price",
+                            "mrp": ".ProductCard__DiscountedPrice, .mrp, .original-price",
+                            "image": "img",
+                        },
+                        "meesho",
+                        q,
+                    ))
+                except Exception as e:
+                    print(f"[Playwright meesho] error: {e}")
+                ctx.close()
+
+            # Snapdeal
+            if "snapdeal" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    page.goto(f"https://www.snapdeal.com/search?keyword={kw}", wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(5000)
+                    items = page.query_selector_all(".product-tuple-listing")
+                    for item in items[:12]:
+                        try:
+                            title_el = item.query_selector(".product-title")
+                            title = title_el.inner_text().strip() if title_el else ""
+
+                            link_el = item.query_selector("a")
+                            href = link_el.get_attribute("href") if link_el else ""
+
+                            # Price text contains "Rs. MRPRs. sale_price X% Off"
+                            price_el = item.query_selector(".product-price")
+                            mrp_el = item.query_selector(".product-mrp")
+
+                            price = 0.0
+                            mrp = 0.0
+
+                            if price_el:
+                                p_text = price_el.inner_text().strip()
+                                nums = re.findall(r'Rs\.\s*([\d,]+)', p_text)
+                                if len(nums) >= 2:
+                                    # First number is MRP (struck), second is sale price
+                                    mrp = float(nums[0].replace(",", ""))
+                                    # Second number may be sale price + discount% concatenated
+                                    price_str = nums[1].replace(",", "")
+                                    price_val = float(price_str)
+                                    if price_val > mrp:
+                                        # Find split where left part is a reasonable sale price (< mrp)
+                                        for i in range(1, len(price_str)):
+                                            left = float(price_str[:i])
+                                            if left < mrp and left > 0:
+                                                price = left
+                                                break
+                                        else:
+                                            price = price_val
+                                    else:
+                                        price = price_val
+                                elif len(nums) == 1:
+                                    price = float(nums[0].replace(",", ""))
+                                    mrp = price * 1.5
+
+                            if mrp_el and mrp == 0:
+                                m_text = mrp_el.inner_text().strip()
+                                m_nums = re.findall(r'[\d,]+', m_text.replace("Rs.", "").replace(" ", ""))
+                                if m_nums:
+                                    mrp = float(m_nums[0].replace(",", ""))
+
+                            if not mrp or mrp < price:
+                                mrp = price * 1.5 if price else 999
+
+                            # Image
+                            img_el = item.query_selector("img")
+                            img = ""
+                            if img_el:
+                                img = img_el.get_attribute("src") or img_el.get_attribute("data-src") or ""
+
+                            if title and href and price > 0:
+                                p = Product(
+                                    source="snapdeal",
+                                    title=title,
+                                    url=href,
+                                    image=img,
+                                    price=price,
+                                    mrp=mrp,
+                                    rating=None,
+                                    reviews=None,
+                                    category=q.category,
+                                    brand=None,
+                                )
+                                if p.discount_pct >= q.min_discount:
+                                    results.append(p)
+                        except Exception:
+                            continue
+                except Exception as e:
+                    print(f"[Playwright snapdeal] error: {e}")
+                ctx.close()
+
             browser.close()
         return results
 
@@ -1137,6 +1419,11 @@ def build_fetchers() -> List[ProductFetcher]:
         fetchers.append(MockFetcher("amazon", "https://www.amazon.in"))
         fetchers.append(MockFetcher("flipkart", "https://www.flipkart.com"))
         fetchers.append(MockFetcher("myntra", "https://www.myntra.com"))
+        fetchers.append(MockFetcher("ajio", "https://www.ajio.com"))
+        fetchers.append(MockFetcher("tatacliq", "https://www.tatacliq.com"))
+        fetchers.append(MockFetcher("nykaa", "https://www.nykaafashion.com"))
+        fetchers.append(MockFetcher("meesho", "https://www.meesho.com"))
+        fetchers.append(MockFetcher("snapdeal", "https://www.snapdeal.com"))
         return fetchers
 
     if source == "free":
