@@ -65,52 +65,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ─── Sidebar: config ──────────────────────────────────────────────
-st.sidebar.title("⚙️ Configuration")
-# Map env -> UI labels and default index
-_source_env = os.getenv("DATA_SOURCE", "free").lower()
-_SOURCE_OPTIONS = ["Mock (demo)", "Free (Google + PA-API)", "RapidAPI (paid)"]
-_SOURCE_MAP = {
-    "mock": "Mock (demo)",
-    "free": "Free (Google + PA-API)",
-    "rapidapi": "RapidAPI (paid)",
-}
-_default_label = _SOURCE_MAP.get(_source_env, "Mock (demo)")
-_default_index = _SOURCE_OPTIONS.index(_default_label)
-
-data_source = st.sidebar.radio(
-    "Data source",
-    _SOURCE_OPTIONS,
-    index=_default_index,
-)
-if data_source == "RapidAPI (paid)":
-    os.environ["DATA_SOURCE"] = "rapidapi"
-    st.sidebar.info("Set `RAPIDAPI_KEY` in your `.env` file.")
-elif data_source == "Free (Google + PA-API)":
-    os.environ["DATA_SOURCE"] = "free"
-    st.sidebar.info(
-        "Free mode uses:\n"
-        "- Playwright scraper for Flipkart, Myntra, Ajio, Tata CLiQ, Nykaa, Meesho, Snapdeal\n"
-        "- Google Custom Search (100 queries/day free)\n"
-        "- Amazon PA-API (free with Associates account)\n\n"
-        "Set `GOOGLE_API_KEY`, `GOOGLE_CX` and optionally `AMAZON_*` keys in `.env`."
-    )
-else:
-    os.environ["DATA_SOURCE"] = "mock"
+# ─── Data source (internal, not shown to user) ───────────────────
+os.environ["DATA_SOURCE"] = os.getenv("DATA_SOURCE", "free").lower()
 
 llm_key = os.getenv("OPENAI_API_KEY")
 if not llm_key:
-    st.sidebar.warning("No `OPENAI_API_KEY` found — LLM ranking / NLQ disabled.")
-else:
-    st.sidebar.success("LLM features enabled.")
-
-# Debug: show what's actually configured
-with st.sidebar.expander("🔧 Debug info"):
-    st.write(f"DATA_SOURCE env: `{os.getenv('DATA_SOURCE', 'NOT SET')}`")
-    st.write(f"GOOGLE_API_KEY set: {'✅' if os.getenv('GOOGLE_API_KEY') else '❌'}`")
-    st.write(f"GOOGLE_CX set: {'✅' if os.getenv('GOOGLE_CX') else '❌'}`")
-    st.write(f"AMAZON_ACCESS_KEY set: {'✅' if os.getenv('AMAZON_ACCESS_KEY') else '❌'}`")
-    st.write(f"Sidebar selected: `{data_source}`")
+    st.sidebar.info("LLM ranking / NLQ disabled.")
 
 # ─── Header ─────────────────────────────────────────────────────
 st.title("🔥 TrackOffer India")
