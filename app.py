@@ -70,9 +70,9 @@ elif data_source == "Free (Google + PA-API)":
     os.environ["DATA_SOURCE"] = "free"
     st.sidebar.info(
         "Free mode uses:\n"
+        "- Playwright scraper for Flipkart, Myntra, Ajio, Tata CLiQ, Nykaa, Meesho, Snapdeal\n"
         "- Google Custom Search (100 queries/day free)\n"
-        "- Amazon PA-API (free with Associates account)\n"
-        "- Mock data for Flipkart & Myntra (no free API)\n\n"
+        "- Amazon PA-API (free with Associates account)\n\n"
         "Set `GOOGLE_API_KEY`, `GOOGLE_CX` and optionally `AMAZON_*` keys in `.env`."
     )
 else:
@@ -125,8 +125,8 @@ with st.expander("Advanced Filters"):
 
     sources = st.multiselect(
         "Sources",
-        ["amazon", "flipkart", "myntra"],
-        default=["amazon", "flipkart", "myntra"],
+        ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal"],
+        default=["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal"],
     )
 
 # ─── Run search ──────────────────────────────────────────────────
@@ -232,7 +232,10 @@ if search_clicked and nl_query:
                 c_img, c_info, c_price = st.columns([1, 3, 2])
                 with c_img:
                     if row["Image"]:
-                        st.image(row["Image"], use_container_width=True)
+                        try:
+                            st.image(row["Image"], use_container_width=True)
+                        except Exception:
+                            pass
                 with c_info:
                     st.markdown(f"**{row['Title']}**")
                     st.caption(f"📦 {row['Source']}  |  ⭐ {row['Rating']} ({row['Reviews']} reviews)")
