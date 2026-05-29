@@ -919,8 +919,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                     if link_el:
                         href = link_el.get_attribute("href") or ""
                     if href:
-    href = _extract_amazon_real_url(href, selectors.get("base_url", "https://www.amazon.in"))
-href = _add_amazon_affiliate(href)
+                        href = _extract_amazon_real_url(href, selectors.get("base_url", "https://www.amazon.in"))
+                    href = _add_amazon_affiliate(href)
 
                     # Price
                     price = 0.0
