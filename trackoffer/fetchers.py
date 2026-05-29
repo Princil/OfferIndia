@@ -5,7 +5,7 @@ import random
 import re
 from abc import ABC, abstractmethod
 from typing import List
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, parse_qs, unquote
 
 import requests
 
@@ -29,6 +29,24 @@ def _add_amazon_affiliate(url: str) -> str:
     separator = "&" if "?" in url else "?"
     return f"{url}{separator}tag={tag}"
 
+def _extract_amazon_real_url(href: str, base_url: str = "https://www.amazon.in") -> str:
+    """Extract real product URL from Amazon redirect/click-tracking links."""
+    if not href:
+        return ""
+    # Sponsored products: /sspa/click?...&url=%2Fdp%2F...
+    if "/sspa/click" in href:
+        try:
+            qs = href.split("?", 1)[1] if "?" in href else ""
+            params = parse_qs(qs)
+            real_path = params.get("url", [""])[0]
+            if real_path:
+                return base_url + unquote(real_path)
+        except Exception:
+            pass
+    # Normal product links
+    if href.startswith("http"):
+        return href
+    return base_url + href
 
 # ─── Constants ──────────────────────────────────────────────────────────
 MOCK_CATEGORIES = [
@@ -617,9 +635,9 @@ class AmazonScraperFetcher(ProductFetcher):
                 try:
                     link_tag = item.find("a", class_="a-link-normal")
                     href = link_tag.get("href", "") if link_tag else ""
-                    if href and not href.startswith("http"):
-                        href = self.base_url + href
-                    href = _add_amazon_affiliate(href)
+                    if href:
+    href = _extract_amazon_real_url(href, self.base_url)
+href = _add_amazon_affiliate(href)
 
                     title_tag = item.find("span", class_="a-text-normal") or item.find("h2")
                     title = title_tag.get_text(strip=True) if title_tag else ""
@@ -901,9 +919,9 @@ class PlaywrightScraperFetcher(ProductFetcher):
                     href = ""
                     if link_el:
                         href = link_el.get_attribute("href") or ""
-                    if href and not href.startswith("http"):
-                        href = selectors["base_url"] + href
-                    href = _add_amazon_affiliate(href)
+                    if href:
+    href = _extract_amazon_real_url(href, selectors.get("base_url", "https://www.amazon.in"))
+href = _add_amazon_affiliate(href)
 
                     # Price
                     price = 0.0
