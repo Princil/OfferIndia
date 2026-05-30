@@ -95,23 +95,11 @@ with col2:
     st.write("")
     search_clicked = st.button("🔍 Search Deals", type="primary", use_container_width=True)
 
-# ─── Advanced filters (expander) ─────────────────────────────────
-with st.expander("Advanced Filters"):
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        min_discount = st.slider("Min Discount %", 0, 90, 50, 5)
-    with c2:
-        min_price = st.number_input("Min Price (₹)", 0, 500000, 0, 100)
-    with c3:
-        max_price = st.number_input("Max Price (₹)", 0, 500000, 0, 100)
-    if max_price == 0:
-        max_price = None
-
-    sources = st.multiselect(
-        "Sources",
-        ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal", "shopclues", "limeroad"],
-        default=["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal", "shopclues", "limeroad"],
-    )
+# ─── Hidden defaults (advanced filters disabled for now) ─────────
+min_discount = 50
+min_price = 0
+max_price = None
+sources = ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal", "shopclues", "limeroad"]
 
 # ─── Run search ──────────────────────────────────────────────────
 if search_clicked and nl_query:
@@ -239,3 +227,7 @@ elif search_clicked and not nl_query:
 # ─── Footer ─────────────────────────────────────────────────────
 st.divider()
 st.caption("Built with ❤️ for Indian shoppers. Data is approximate; verify on the retailer site before buying.")
+st.caption(
+    "All product names, logos, and brands are property of their respective owners. "
+    "Use of these names, logos, and brands does not imply endorsement."
+)
