@@ -350,14 +350,16 @@ class GoogleCustomSearchFetcher(ProductFetcher):
                 },
                 timeout=20,
             )
-            # Surface API errors (quota, invalid key, etc.)
+            # Log API errors but don't crash the whole search
             if resp.status_code != 200:
                 try:
                     err = resp.json().get("error", {}).get("message", resp.text)
                 except Exception:
                     err = resp.text
                 api_error = f"Google API error ({resp.status_code}): {err}"
-                raise RuntimeError(api_error)
+                print(api_error)
+                self._last_error = api_error
+                return results
 
             data = resp.json()
             items = data.get("items", [])
@@ -1427,7 +1429,10 @@ def build_fetchers() -> List[ProductFetcher]:
         return fetchers
 
     if source == "free":
-        # Requests-based scrapers (lightweight, no browser needed)
+        # Playwright scraper (heavy RAM - may crash on 512MB free tier)
+        fetchers.append(PlaywrightScraperFetcher())
+
+        # Requests-based scrapers (lightweight fallback)
         fetchers.append(AmazonScraperFetcher())
         fetchers.append(FlipkartScraperFetcher())
         fetchers.append(MyntraScraperFetcher())
