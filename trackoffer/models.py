@@ -33,5 +33,5 @@ class SearchQuery(BaseModel):
     max_price: Optional[float] = None
     min_price: Optional[float] = None
     category: Optional[str] = None
-    sources: list[str] = ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal"]
+    sources: list[str] = ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal", "shopclues", "limeroad"]
     min_rating: Optional[float] = None
