@@ -79,7 +79,7 @@ st.markdown(
 # ─── Header ─────────────────────────────────────────────────────
 st.title("🔥 TrackOffer India")
 st.markdown(
-    "Find products with **>50% off** across **Amazon, Flipkart & Myntra** — ranked by deal quality."
+    "Find products with **>50% off** across **Amazon, Flipkart, Tata CLiQ, Snapdeal & more** — ranked by deal quality."
 )
 st.divider()
 
@@ -109,8 +109,8 @@ with st.expander("Advanced Filters"):
 
     sources = st.multiselect(
         "Sources",
-        ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal"],
-        default=["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal"],
+        ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal", "shopclues", "limeroad"],
+        default=["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal", "shopclues", "limeroad"],
     )
 
 # ─── Run search ──────────────────────────────────────────────────
@@ -232,18 +232,6 @@ if search_clicked and nl_query:
                         unsafe_allow_html=True,
                     )
                     st.markdown(f"💰 **Save ₹{row['Savings (₹)']}**")
-
-        # Summary stats
-        st.divider()
-        c_a, c_b, c_c = st.columns(3)
-        with c_a:
-            st.metric("Total Deals", len(df))
-        with c_b:
-            avg_disc = round(df["Discount %"].str.replace("%", "").astype(float).mean(), 1) if len(df) else 0
-            st.metric("Avg Discount", f"{avg_disc}%")
-        with c_c:
-            max_savings = df["Savings (₹)"].max() if len(df) else 0
-            st.metric("Max Savings", f"₹{max_savings}")
 
 elif search_clicked and not nl_query:
     st.warning("Please enter a search query.")
