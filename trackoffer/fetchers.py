@@ -1427,15 +1427,12 @@ def build_fetchers() -> List[ProductFetcher]:
         return fetchers
 
     if source == "free":
-        # Playwright headless browser scraper (most reliable)
-        fetchers.append(PlaywrightScraperFetcher())
-
-        # Fallback: requests-based scrapers
+        # Requests-based scrapers (lightweight, no browser needed)
         fetchers.append(AmazonScraperFetcher())
         fetchers.append(FlipkartScraperFetcher())
         fetchers.append(MyntraScraperFetcher())
 
-        # Google Custom Search (cross-site discovery)
+        # Google Custom Search (cross-site discovery, lightweight HTTP)
         g_key = os.getenv("GOOGLE_API_KEY", "")
         g_cx = os.getenv("GOOGLE_CX", "")
         if g_key and g_cx:
