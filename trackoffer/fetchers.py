@@ -324,6 +324,8 @@ class GoogleCustomSearchFetcher(ProductFetcher):
         "nykaa": "nykaafashion.com",
         "meesho": "meesho.com",
         "snapdeal": "snapdeal.com",
+        "shopclues": "shopclues.com",
+        "limeroad": "limeroad.com",
     }
 
     def search(self, q: SearchQuery) -> List[Product]:
@@ -1179,7 +1181,10 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 try:
                     page.goto(f"https://www.tatacliq.com/search/?searchCategory=all&text={kw}", wait_until="domcontentloaded", timeout=30000)
                     page.wait_for_timeout(5000)
+                    page_title = page.title()
+                    page_url = page.url
                     items = page.query_selector_all(".ProductModule__base")
+                    print(f"[Playwright tatacliq] Page: {page_url} | Title: {page_title} | Items found: {len(items)}")
                     for item in items[:12]:
                         try:
                             desc_el = item.query_selector(".ProductDescription__base")
@@ -1408,6 +1413,148 @@ class PlaywrightScraperFetcher(ProductFetcher):
                     print(f"[Playwright snapdeal] error: {e}")
                 ctx.close()
 
+            # Shopclues
+            if "shopclues" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    page.goto(f"https://www.shopclues.com/search?q={kw}", wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(5000)
+                    items = page.query_selector_all(".column.col3")
+                    for item in items[:12]:
+                        try:
+                            # Title from anchor text - everything before first ₹
+                            link_el = item.query_selector("a")
+                            full_text = link_el.inner_text().strip() if link_el else ""
+                            title_match = re.match(r'^(.*?)(?:[₹])', full_text)
+                            title = title_match.group(1).strip() if title_match else full_text
+
+                            # Link
+                            href = link_el.get_attribute("href") if link_el else ""
+                            if href and href.startswith("//"):
+                                href = "https:" + href
+
+                            # Price
+                            price = 0.0
+                            price_el = item.query_selector(".p_price")
+                            if price_el:
+                                p_text = price_el.inner_text().strip()
+                                nums = re.findall(r'[₹]\s*([\d,]+)', p_text)
+                                if nums:
+                                    price = float(nums[0].replace(",", ""))
+
+                            # MRP from full item text
+                            mrp = 0.0
+                            all_text = item.inner_text().strip()
+                            prices = re.findall(r'[₹]\s*([\d,]+)', all_text)
+                            if len(prices) >= 2:
+                                mrp = float(prices[1].replace(",", ""))
+                            elif price > 0:
+                                mrp = price * 2
+
+                            if not mrp or mrp < price:
+                                mrp = price * 2 if price else 999
+
+                            # Image
+                            img = ""
+                            img_el = item.query_selector("img")
+                            if img_el:
+                                img = img_el.get_attribute("src") or ""
+
+                            if title and href and price > 0:
+                                p = Product(
+                                    source="shopclues",
+                                    title=title,
+                                    url=href,
+                                    image=img,
+                                    price=price,
+                                    mrp=mrp,
+                                    rating=None,
+                                    reviews=None,
+                                    category=q.category,
+                                    brand=None,
+                                )
+                                if p.discount_pct >= q.min_discount:
+                                    results.append(p)
+                        except Exception:
+                            continue
+                except Exception as e:
+                    print(f"[Playwright shopclues] error: {e}")
+                ctx.close()
+
+            # Limeroad
+            if "limeroad" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    page.goto(f"https://www.limeroad.com/search?q={kw}", wait_until="networkidle", timeout=30000)
+                    page.wait_for_timeout(5000)
+                    # Scroll to trigger lazy loading
+                    for _ in range(3):
+                        page.evaluate("window.scrollBy(0, 800)")
+                        page.wait_for_timeout(1500)
+                    items = page.query_selector_all(".plpTile, .product-card, .plp-card, .plp-product-card")
+                    for item in items[:12]:
+                        try:
+                            title_el = item.query_selector(".name, .product-name, .product-title")
+                            title = title_el.inner_text().strip() if title_el else ""
+
+                            link_el = item.query_selector("a")
+                            href = link_el.get_attribute("href") if link_el else ""
+                            if href and not href.startswith("http"):
+                                href = "https://www.limeroad.com" + href
+
+                            price = 0.0
+                            mrp = 0.0
+                            price_el = item.query_selector(".selling-price, .price")
+                            if price_el:
+                                p_text = price_el.inner_text().strip()
+                                nums = re.findall(r'[₹]\s*([\d,]+)', p_text)
+                                if nums:
+                                    price = float(nums[0].replace(",", ""))
+
+                            mrp_el = item.query_selector(".mrp, .original-price")
+                            if mrp_el:
+                                m_text = mrp_el.inner_text().strip()
+                                m_nums = re.findall(r'[₹]\s*([\d,]+)', m_text)
+                                if m_nums:
+                                    mrp = float(m_nums[0].replace(",", ""))
+
+                            if not mrp or mrp < price:
+                                mrp = price * 1.5 if price else 999
+
+                            img = ""
+                            img_el = item.query_selector("img")
+                            if img_el:
+                                img = img_el.get_attribute("src") or img_el.get_attribute("data-src") or ""
+
+                            if title and href and price > 0:
+                                p = Product(
+                                    source="limeroad",
+                                    title=title,
+                                    url=href,
+                                    image=img,
+                                    price=price,
+                                    mrp=mrp,
+                                    rating=None,
+                                    reviews=None,
+                                    category=q.category,
+                                    brand=None,
+                                )
+                                if p.discount_pct >= q.min_discount:
+                                    results.append(p)
+                        except Exception:
+                            continue
+                except Exception as e:
+                    print(f"[Playwright limeroad] error: {e}")
+                ctx.close()
+
             browser.close()
         return results
 
@@ -1426,6 +1573,8 @@ def build_fetchers() -> List[ProductFetcher]:
         fetchers.append(MockFetcher("nykaa", "https://www.nykaafashion.com"))
         fetchers.append(MockFetcher("meesho", "https://www.meesho.com"))
         fetchers.append(MockFetcher("snapdeal", "https://www.snapdeal.com"))
+        fetchers.append(MockFetcher("shopclues", "https://www.shopclues.com"))
+        fetchers.append(MockFetcher("limeroad", "https://www.limeroad.com"))
         return fetchers
 
     if source == "free":
