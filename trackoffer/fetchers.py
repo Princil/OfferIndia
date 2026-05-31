@@ -4,6 +4,7 @@ import os
 import random
 import re
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 from urllib.parse import quote_plus, parse_qs, unquote
 
@@ -906,13 +907,13 @@ class PlaywrightScraperFetcher(ProductFetcher):
     """Headless browser scraper using Playwright. Handles JS-rendered pages."""
     source_name = "playwright"
 
-    def __init__(self):
-        pass
+    def __init__(self, target_sites=None):
+        self.target_sites = target_sites
 
     def _scrape_site(self, page, url: str, selectors: dict, source: str, q: SearchQuery) -> List[Product]:
         results: list[Product] = []
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(url, wait_until="domcontentloaded", timeout=10000)
             page.wait_for_timeout(3000)  # Wait for JS to load content
 
             # Try to find product containers
@@ -994,6 +995,18 @@ class PlaywrightScraperFetcher(ProductFetcher):
             print("[Playwright] not installed — run: python -m playwright install chromium")
             return []
 
+        # If configured for specific sites only, filter sources
+        if self.target_sites:
+            q = SearchQuery(
+                keywords=q.keywords,
+                min_discount=q.min_discount,
+                max_price=q.max_price,
+                min_price=q.min_price,
+                category=q.category,
+                sources=[s for s in q.sources if s in self.target_sites],
+                min_rating=q.min_rating,
+            )
+
         results: list[Product] = []
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -1004,6 +1017,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                     "--disable-blink-features=AutomationControlled",
                 ],
             )
+            # Short page timeout — sites that don't load in 10s won't load in 30s
+            PAGE_TIMEOUT = 10000
             kw = quote_plus(q.keywords)
 
             # Amazon - separate page to avoid cross-site contamination
@@ -1038,7 +1053,7 @@ class PlaywrightScraperFetcher(ProductFetcher):
                     viewport={"width": 1920, "height": 1080},
                 )
                 page = ctx.new_page()
-                page.goto(f"https://www.flipkart.com/search?q={kw}", wait_until="domcontentloaded", timeout=30000)
+                page.goto(f"https://www.flipkart.com/search?q={kw}", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
                 page.wait_for_timeout(3000)
                 try:
                     close_btn = page.query_selector("button._2KpZ6l._2doB4z")
@@ -1184,8 +1199,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 )
                 page = ctx.new_page()
                 try:
-                    page.goto(f"https://www.tatacliq.com/search/?searchCategory=all&text={kw}", wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(5000)
+                    page.goto(f"https://www.tatacliq.com/search/?searchCategory=all&text={kw}", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+                    page.wait_for_timeout(3000)
                     page_title = page.title()
                     page_url = page.url
                     items = page.query_selector_all(".ProductModule__base")
@@ -1340,8 +1355,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 )
                 page = ctx.new_page()
                 try:
-                    page.goto(f"https://www.snapdeal.com/search?keyword={kw}", wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(5000)
+                    page.goto(f"https://www.snapdeal.com/search?keyword={kw}", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+                    page.wait_for_timeout(3000)
                     items = page.query_selector_all(".product-tuple-listing")
                     for item in items[:12]:
                         try:
@@ -1426,8 +1441,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 )
                 page = ctx.new_page()
                 try:
-                    page.goto(f"https://www.shopclues.com/search?q={kw}", wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(5000)
+                    page.goto(f"https://www.shopclues.com/search?q={kw}", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+                    page.wait_for_timeout(3000)
                     items = page.query_selector_all(".column.col3")
                     for item in items[:12]:
                         try:
@@ -1498,12 +1513,12 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 )
                 page = ctx.new_page()
                 try:
-                    page.goto(f"https://www.limeroad.com/search?q={kw}", wait_until="networkidle", timeout=30000)
-                    page.wait_for_timeout(5000)
+                    page.goto(f"https://www.limeroad.com/search?q={kw}", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+                    page.wait_for_timeout(3000)
                     # Scroll to trigger lazy loading
                     for _ in range(3):
                         page.evaluate("window.scrollBy(0, 800)")
-                        page.wait_for_timeout(1500)
+                        page.wait_for_timeout(1000)
                     items = page.query_selector_all(".plpTile, .product-card, .plp-card, .plp-product-card")
                     for item in items[:12]:
                         try:
@@ -1596,8 +1611,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 )
                 page = ctx.new_page()
                 try:
-                    page.goto("https://www.oppo.com/in/smartphones/", wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(8000)
+                    page.goto("https://www.oppo.com/in/smartphones/", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+                    page.wait_for_timeout(3000)
                     
                     # OPPO page structure: look for divs/spans containing both model name and price
                     # Try common product container patterns
@@ -1703,8 +1718,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 )
                 page = ctx.new_page()
                 try:
-                    page.goto("https://www.realme.com/in/", wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(5000)
+                    page.goto("https://www.realme.com/in/", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+                    page.wait_for_timeout(3000)
                     
                     # realme products: links have title, prices in parent/sibling
                     links = page.query_selector_all("a[href*='/realme-']")
@@ -1773,8 +1788,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 page = ctx.new_page()
                 try:
                     # boAt uses Shopify - use collections/all page
-                    page.goto("https://www.boat-lifestyle.com/collections/all", wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(5000)
+                    page.goto("https://www.boat-lifestyle.com/collections/all", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+                    page.wait_for_timeout(3000)
                     
                     items = page.query_selector_all(".product-card")
                     for item in items[:12]:
@@ -1834,8 +1849,8 @@ class PlaywrightScraperFetcher(ProductFetcher):
                 page = ctx.new_page()
                 try:
                     # Dot&Key uses Shopify - use collections/all
-                    page.goto("https://www.dotandkey.com/collections/all", wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(5000)
+                    page.goto("https://www.dotandkey.com/collections/all", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
+                    page.wait_for_timeout(3000)
                     
                     items = page.query_selector_all(".product-card")
                     for item in items[:12]:
@@ -1916,8 +1931,14 @@ def build_fetchers() -> List[ProductFetcher]:
         return fetchers
 
     if source == "free":
-        # Playwright scraper (heavy RAM - may crash on 512MB free tier)
-        fetchers.append(PlaywrightScraperFetcher())
+        # Create one Playwright fetcher per site so ThreadPoolExecutor can parallelize
+        playwright_sites = [
+            "amazon", "flipkart", "myntra", "ajio", "tatacliq",
+            "nykaa", "meesho", "snapdeal", "shopclues", "limeroad",
+            "oppo", "realme", "boat", "dotandkey",
+        ]
+        for site in playwright_sites:
+            fetchers.append(PlaywrightScraperFetcher(target_sites=[site]))
 
         # Requests-based scrapers (lightweight fallback)
         fetchers.append(AmazonScraperFetcher())
