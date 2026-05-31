@@ -402,7 +402,12 @@ class GoogleCustomSearchFetcher(ProductFetcher):
                         category=q.category,
                         brand=None,
                     )
-                    if p.discount_pct >= q.min_discount:
+                    # Include if we have real prices and discount matches,
+                    # OR if price extraction failed (Google already found relevant results)
+                    if price > 0 and p.discount_pct >= q.min_discount:
+                        results.append(p)
+                    elif price == 0:
+                        # Can't extract price from snippet, but Google found it — include it
                         results.append(p)
                 except Exception:
                     continue
@@ -428,8 +433,8 @@ class GoogleCustomSearchFetcher(ProductFetcher):
     def _extract_price(text: str) -> tuple[float, float]:
         """Extract ₹ price patterns from text."""
         import re
-        # Look for patterns like ₹1,999 or Rs. 1999 or INR 1999
-        pattern = r"[₹Rs\.\s]+[\s]*([\d,]+(?:\.\d{1,2})?)"
+        # Look for ₹1,999 / Rs. 1999 / INR 1999 / Price: 1,999 / MRP: 1,999
+        pattern = r"(?:₹|Rs\.?|INR|MRP|Price)[\s\.]*([\d,]+(?:\.\d{1,2})?)"
         matches = re.findall(pattern, text, re.IGNORECASE)
         nums = []
         for m in matches:
@@ -437,6 +442,16 @@ class GoogleCustomSearchFetcher(ProductFetcher):
                 nums.append(float(m.replace(",", "")))
             except ValueError:
                 continue
+        # Also grab standalone 4-digit numbers (likely prices in Indian context)
+        if len(nums) < 2:
+            standalone = re.findall(r"\b([\d,]{3,5}(?:\.\d{1,2})?)\b", text)
+            for m in standalone:
+                try:
+                    v = float(m.replace(",", ""))
+                    if 100 <= v <= 500000 and v not in nums:  # Reasonable price range
+                        nums.append(v)
+                except ValueError:
+                    continue
         if len(nums) >= 2:
             return min(nums), max(nums)
         if len(nums) == 1:
@@ -889,18 +904,6 @@ try:
     _HAS_PLAYWRIGHT = True
 except Exception:
     _HAS_PLAYWRIGHT = False
-
-# Auto-install Chromium browser binary (needed for Streamlit Cloud / fresh installs)
-if _HAS_PLAYWRIGHT:
-    try:
-        import subprocess
-        import sys
-        result = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            capture_output=True, text=True, timeout=300,
-        )
-    except Exception:
-        pass  # Browser may already be installed or install will happen on first use
 
 
 class PlaywrightScraperFetcher(ProductFetcher):
@@ -1930,17 +1933,20 @@ def build_fetchers() -> List[ProductFetcher]:
         fetchers.append(MockFetcher("dotandkey", "https://www.dotandkey.com"))
         return fetchers
 
-    if source == "free":
-        # Create one Playwright fetcher per site so ThreadPoolExecutor can parallelize
-        playwright_sites = [
-            "amazon", "flipkart", "myntra", "ajio", "tatacliq",
-            "nykaa", "meesho", "snapdeal", "shopclues", "limeroad",
-            "oppo", "realme", "boat", "dotandkey",
-        ]
-        for site in playwright_sites:
-            fetchers.append(PlaywrightScraperFetcher(target_sites=[site]))
+    if source in ("free", "render"):
+        # Render mode = NO Playwright (saves ~300MB RAM, works on 512MB free tier)
+        # Free mode = includes Playwright per-site scrapers
+        if source == "free":
+            # Create one Playwright fetcher per site so ThreadPoolExecutor can parallelize
+            playwright_sites = [
+                "amazon", "flipkart", "myntra", "ajio", "tatacliq",
+                "nykaa", "meesho", "snapdeal", "shopclues", "limeroad",
+                "oppo", "realme", "boat", "dotandkey",
+            ]
+            for site in playwright_sites:
+                fetchers.append(PlaywrightScraperFetcher(target_sites=[site]))
 
-        # Requests-based scrapers (lightweight fallback)
+        # Requests-based scrapers (lightweight HTTP, no browser needed)
         fetchers.append(AmazonScraperFetcher())
         fetchers.append(FlipkartScraperFetcher())
         fetchers.append(MyntraScraperFetcher())
@@ -1958,6 +1964,9 @@ def build_fetchers() -> List[ProductFetcher]:
         if amz_key and amz_secret and amz_tag:
             fetchers.append(AmazonPAAPIFetcher(amz_key, amz_secret, amz_tag))
 
+        # Cached deals from GitHub Actions scraper (deals.json)
+        fetchers.append(DealsJSONFetcher())
+
         return fetchers
 
     # RapidAPI mode (legacy paid option)
@@ -1972,3 +1981,60 @@ def build_fetchers() -> List[ProductFetcher]:
     fetchers.append(RapidAPIFlipkartFetcher(api_key, flipkart_host))
     fetchers.append(MockFetcher("myntra", "https://www.myntra.com"))
     return fetchers
+
+
+# ─── Deals JSON fetcher (loads pre-scraped deals from GitHub Actions) ─────
+class DealsJSONFetcher(ProductFetcher):
+    """Load deals from deals.json — scraped by GitHub Actions every 2 hours.
+    Zero RAM usage, zero API calls, instant search."""
+    source_name = "cached"
+
+    def __init__(self, json_path: str = "deals.json"):
+        self.json_path = json_path
+
+    def search(self, q: SearchQuery) -> List[Product]:
+        results: list[Product] = []
+        try:
+            import json
+            from pathlib import Path
+            path = Path(self.json_path)
+            if not path.exists():
+                print("[DealsJSON] deals.json not found")
+                return results
+
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+
+            for item in data.get("products", []):
+                try:
+                    # Keyword filter
+                    title = item.get("title", "").lower()
+                    keywords = q.keywords.lower().split()
+                    if not any(kw in title for kw in keywords):
+                        continue
+
+                    p = Product(
+                        source=item.get("source", "cached"),
+                        title=item.get("title", ""),
+                        url=item.get("url", ""),
+                        image=item.get("image"),
+                        price=item.get("price", 0.0),
+                        mrp=item.get("mrp", 0.0),
+                        discount_pct=item.get("discount_pct", 0),
+                        savings=item.get("savings", 0.0),
+                        rating=item.get("rating"),
+                        reviews=item.get("reviews"),
+                        category=q.category,
+                        brand=item.get("brand"),
+                    )
+                    # Apply min_discount filter
+                    if p.discount_pct >= q.min_discount:
+                        results.append(p)
+                except Exception:
+                    continue
+
+            # Sort by discount
+            results.sort(key=lambda x: x.discount_pct, reverse=True)
+        except Exception as e:
+            print(f"[DealsJSON] error: {e}")
+        return results
