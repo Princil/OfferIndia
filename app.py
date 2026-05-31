@@ -1,6 +1,7 @@
 """TrackOffer — Streamlit app to find >50% off deals across Amazon, Flipkart, Myntra."""
 from __future__ import annotations
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -238,8 +239,10 @@ BUBBLE_GAME_HTML = """
 # ─── Run search ──────────────────────────────────────────────────
 if search_clicked and nl_query:
     # Show bubble game while fetching
-    st.markdown("**Parsing query & fetching deals …** 🫧")
-    html(BUBBLE_GAME_HTML, height=420)
+    game_placeholder = st.empty()
+    with game_placeholder.container():
+        st.markdown("**Parsing query & fetching deals …** 🫧")
+        html(BUBBLE_GAME_HTML, height=420)
 
     # Run search in background
     base_q = llm.parse_query(nl_query)
@@ -257,18 +260,50 @@ if search_clicked and nl_query:
     all_products: list = []
     source_counts: dict[str, int] = {}
     google_error = None
-    for f in fetchers:
-        if f.source_name in q.sources or f.source_name in ("google", "playwright"):
-            try:
-                batch = f.search(q)
+
+    # Filter active fetchers
+    active_fetchers = [
+        f for f in fetchers
+        if f.source_name in q.sources or f.source_name in ("google", "playwright")
+    ]
+
+    # Progress bar
+    progress_bar = st.progress(0, text="Fetching deals …")
+    completed = 0
+    total = len(active_fetchers)
+
+    # Run fetchers in parallel with timeout
+    def run_fetcher(fetcher):
+        try:
+            batch = fetcher.search(q)
+            return fetcher.source_name, batch, None
+        except Exception as e:
+            return fetcher.source_name, [], str(e)
+
+    with ThreadPoolExecutor(max_workers=min(6, total)) as executor:
+        futures = {executor.submit(run_fetcher, f): f for f in active_fetchers}
+        for future in as_completed(futures):
+            src_name, batch, err = future.result()
+            completed += 1
+            progress_bar.progress(
+                completed / total,
+                text=f"Fetched {src_name} ({completed}/{total}) …"
+            )
+            if err:
+                source_counts[src_name] = 0
+            else:
                 all_products.extend(batch)
                 for p in batch:
                     source_counts[p.source] = source_counts.get(p.source, 0) + 1
-                if f.source_name == "google" and hasattr(f, "_last_error") and f._last_error:
-                    google_error = f._last_error
-            except Exception as e:
-                source_counts[f.source_name] = 0
-                st.error(f"Error fetching from {f.source_name}: {e}")
+                # Check for Google API error
+                fetcher = futures[future]
+                if fetcher.source_name == "google" and hasattr(fetcher, "_last_error") and fetcher._last_error:
+                    google_error = fetcher._last_error
+
+    progress_bar.empty()  # Remove progress bar
+
+    # Hide bubble game once results are ready
+    game_placeholder.empty()
 
     if google_error:
         st.error(f"⚠️ Google Custom Search error: {google_error}")
