@@ -1,0 +1,38 @@
+name: Scrape Deals Every 2 Hours
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # Every 2 hours
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install chromium
+
+      - name: Scrape deals
+        run: python scrape_deals.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+      - name: Commit and push deals.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deals.json
+          git diff --staged --quiet || (git commit -m "Update deals.json - $(date -u '+%Y-%m-%d %H:%M UTC')" && git push)
