@@ -6,10 +6,12 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from streamlit.components.v1 import html
 from dotenv import load_dotenv
 
 from trackoffer.models import SearchQuery
 from trackoffer.fetchers import build_fetchers
+from trackoffer.featured_deals import get_all_featured_deals
 from trackoffer import llm
 
 # Load .env from the same directory as this script, regardless of cwd
@@ -79,9 +81,33 @@ st.markdown(
 # ─── Header ─────────────────────────────────────────────────────
 st.title("🔥 TrackOffer India")
 st.markdown(
-    "Find products with **>50% off** across **Amazon, Flipkart, Tata CLiQ, Snapdeal & more** — ranked by deal quality."
+    "Find products with **>50% off** across **Amazon, Flipkart, OPPO, realme, boAt, Dot&Key & more** — ranked by deal quality."
 )
 st.divider()
+
+# ─── Featured Brand Deals (D2C) ──────────────────────────────────
+featured_deals = get_all_featured_deals(min_discount=50.0)
+if featured_deals:
+    st.subheader("⭐ Featured Brand Deals")
+    st.caption("Hand-picked deals from boAt, OPPO, realme, Dot&Key — updated weekly")
+    
+    # Show top 6 featured deals in a grid
+    for i in range(0, min(6, len(featured_deals)), 3):
+        cols = st.columns(3)
+        for j, deal in enumerate(featured_deals[i:i+3]):
+            with cols[j]:
+                brand_emoji = {"ajio": "👕", "boat": "🎧", "oppo": "📱", "realme": "📱", "dotandkey": "🧴"}.get(deal.source, "🏷️")
+                st.markdown(f"**{brand_emoji} {deal.brand or deal.source.title()}**")
+                st.markdown(f"[{deal.title}]({deal.url})")
+                st.markdown(
+                    f"<span style='color:#e74c3c;font-size:1.3em;font-weight:bold;'>₹{deal.price}</span> "
+                    f"<span style='text-decoration:line-through;color:grey;'>₹{deal.mrp}</span> "
+                    f"<span style='color:green;font-weight:bold;'>-{deal.discount_pct:.0f}%</span>",
+                    unsafe_allow_html=True,
+                )
+                st.link_button("🔗 Open Deal", url=deal.url, use_container_width=True)
+                st.write("")
+    st.divider()
 
 # ─── Search / query input ────────────────────────────────────────
 col1, col2 = st.columns([3, 1])
@@ -99,63 +125,170 @@ with col2:
 min_discount = 50
 min_price = 0
 max_price = None
-sources = ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal", "shopclues", "limeroad"]
+sources = ["amazon", "flipkart", "myntra", "ajio", "tatacliq", "nykaa", "meesho", "snapdeal", "shopclues", "limeroad", "oppo", "realme", "boat", "dotandkey"]
+
+# ─── Bubble Game HTML (injected during loading) ──────────────────
+BUBBLE_GAME_HTML = """
+<div id="bubble-game-container" style="text-align:center;font-family:sans-serif;">
+  <div style="font-size:1.1em;color:#666;margin-bottom:8px;">🫧 Pop the bubbles while we find deals!</div>
+  <div style="font-size:0.9em;color:#888;margin-bottom:10px;">Score: <span id="score" style="font-weight:bold;color:#e74c3c;">0</span></div>
+  <canvas id="bubbleCanvas" width="700" height="350" style="border-radius:12px;cursor:pointer;background:linear-gradient(180deg,#e3f2fd 0%,#bbdefb 100%);"></canvas>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('bubbleCanvas');
+  var ctx = canvas.getContext('2d');
+  var scoreEl = document.getElementById('score');
+  var score = 0;
+  var bubbles = [];
+  var particles = [];
+  var colors = ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FFEAA7','#DDA0DD','#87CEEB','#FF69B4'];
+
+  function rand(a,b){return Math.random()*(b-a)+a;}
+
+  function createBubble(){
+    var r = rand(18,36);
+    bubbles.push({
+      x: rand(r, canvas.width-r),
+      y: canvas.height + r,
+      r: r,
+      speed: rand(0.8,2.2),
+      wobble: rand(0, Math.PI*2),
+      wobbleSpeed: rand(0.02,0.06),
+      color: colors[Math.floor(rand(0,colors.length))],
+      popped: false
+    });
+  }
+
+  for(var i=0;i<12;i++) createBubble();
+
+  canvas.addEventListener('click', function(e){
+    var rect = canvas.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var my = e.clientY - rect.top;
+    for(var i=bubbles.length-1;i>=0;i--){
+      var b = bubbles[i];
+      if(!b.popped && Math.hypot(mx-b.x, my-b.y) < b.r+8){
+        b.popped = true;
+        score++;
+        scoreEl.textContent = score;
+        for(var j=0;j<8;j++){
+          particles.push({
+            x: b.x, y: b.y,
+            vx: rand(-3,3), vy: rand(-3,3),
+            life: 1.0,
+            color: b.color,
+            size: rand(2,5)
+          });
+        }
+        break;
+      }
+    }
+  });
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // Draw particles
+    for(var i=particles.length-1;i>=0;i--){
+      var p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      p.life -= 0.04;
+      if(p.life <= 0){ particles.splice(i,1); continue; }
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw bubbles
+    for(var i=bubbles.length-1;i>=0;i--){
+      var b = bubbles[i];
+      if(b.popped){ bubbles.splice(i,1); continue; }
+      b.y -= b.speed;
+      b.wobble += b.wobbleSpeed;
+      b.x += Math.sin(b.wobble)*0.6;
+      if(b.y < -b.r){ bubbles.splice(i,1); continue; }
+
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+      ctx.fillStyle = b.color + '44';
+      ctx.fill();
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // shine
+      ctx.beginPath();
+      ctx.arc(b.x-b.r*0.25, b.y-b.r*0.25, b.r*0.2, 0, Math.PI*2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+    }
+
+    if(bubbles.length < 12) createBubble();
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+</script>
+"""
 
 # ─── Run search ──────────────────────────────────────────────────
 if search_clicked and nl_query:
-    with st.spinner("Parsing query & fetching deals …"):
-        # 1) Parse natural language
-        base_q = llm.parse_query(nl_query)
-        # 2) Override with advanced filters
-        q = SearchQuery(
-            keywords=base_q.keywords or nl_query,
-            min_discount=min_discount,
-            max_price=max_price if max_price else base_q.max_price,
-            min_price=min_price if min_price else base_q.min_price,
-            category=base_q.category,
-            sources=sources,
-            min_rating=base_q.min_rating,
-        )
+    # Show bubble game while fetching
+    st.markdown("**Parsing query & fetching deals …** 🫧")
+    html(BUBBLE_GAME_HTML, height=420)
 
-        fetchers = build_fetchers()
-        all_products: list = []
-        source_counts: dict[str, int] = {}
-        google_error = None
-        for f in fetchers:
-            if f.source_name in q.sources or f.source_name in ("google", "playwright"):
-                try:
-                    batch = f.search(q)
-                    all_products.extend(batch)
-                    # Count by actual product source, not fetcher name
-                    for p in batch:
-                        source_counts[p.source] = source_counts.get(p.source, 0) + 1
-                    # Check for stored API error on Google fetcher
-                    if f.source_name == "google" and hasattr(f, "_last_error") and f._last_error:
-                        google_error = f._last_error
-                except Exception as e:
-                    source_counts[f.source_name] = 0
-                    st.error(f"Error fetching from {f.source_name}: {e}")
+    # Run search in background
+    base_q = llm.parse_query(nl_query)
+    q = SearchQuery(
+        keywords=base_q.keywords or nl_query,
+        min_discount=min_discount,
+        max_price=max_price if max_price else base_q.max_price,
+        min_price=min_price if min_price else base_q.min_price,
+        category=base_q.category,
+        sources=sources,
+        min_rating=base_q.min_rating,
+    )
 
-        if google_error:
-            st.error(f"⚠️ Google Custom Search error: {google_error}")
+    fetchers = build_fetchers()
+    all_products: list = []
+    source_counts: dict[str, int] = {}
+    google_error = None
+    for f in fetchers:
+        if f.source_name in q.sources or f.source_name in ("google", "playwright"):
+            try:
+                batch = f.search(q)
+                all_products.extend(batch)
+                for p in batch:
+                    source_counts[p.source] = source_counts.get(p.source, 0) + 1
+                if f.source_name == "google" and hasattr(f, "_last_error") and f._last_error:
+                    google_error = f._last_error
+            except Exception as e:
+                source_counts[f.source_name] = 0
+                st.error(f"Error fetching from {f.source_name}: {e}")
 
-        # Show source breakdown
-        st.caption(
-            "Sources used: "
-            + " | ".join(f"**{k}**: {v}" for k, v in sorted(source_counts.items()))
-        )
-        # Warn if only mock data returned
-        if all(p.source in ("amazon", "flipkart", "myntra") for p in all_products[:5]):
-            # Check if URLs look mock-generated
-            mock_count = sum(1 for p in all_products if "/product/" in p.url and p.source in ("amazon", "flipkart", "myntra"))
-            if mock_count > 0:
-                st.warning(
-                    f"⚠️ {mock_count} result(s) appear to be mock/demo data. "
-                    "Make sure sidebar is set to 'Free (Google + PA-API)' and your Google credentials are correct."
-                )
+    if google_error:
+        st.error(f"⚠️ Google Custom Search error: {google_error}")
 
-        # 3) Rank
-        ranked = llm.rank_deals(all_products)
+    # Show source breakdown
+    st.caption(
+        "Sources used: "
+        + " | ".join(f"**{k}**: {v}" for k, v in sorted(source_counts.items()))
+    )
+    # Warn if only mock data returned
+    if all(p.source in ("amazon", "flipkart", "myntra") for p in all_products[:5]):
+        mock_count = sum(1 for p in all_products if "/product/" in p.url and p.source in ("amazon", "flipkart", "myntra"))
+        if mock_count > 0:
+            st.warning(
+                f"⚠️ {mock_count} result(s) appear to be mock/demo data. "
+                "Make sure sidebar is set to 'Free (Google + PA-API)' and your Google credentials are correct."
+            )
+
+    # 3) Rank
+    ranked = llm.rank_deals(all_products)
 
     st.divider()
     st.subheader(f"🎯 {len(ranked)} deals found (≥{q.min_discount}% off)")
