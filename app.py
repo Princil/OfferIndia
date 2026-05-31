@@ -110,6 +110,21 @@ if featured_deals:
                 st.write("")
     st.divider()
 
+# ─── Deals freshness indicator ───────────────────────────────────
+try:
+    from pathlib import Path
+    import json
+    deals_path = Path("deals.json")
+    if deals_path.exists():
+        with open(deals_path, encoding="utf-8") as f:
+            deals_meta = json.load(f)
+        last_updated = deals_meta.get("last_updated", "")
+        total_cached = deals_meta.get("total", 0)
+        if last_updated:
+            st.caption(f"🕐 Live deals cached: **{total_cached}** deals | Last updated: {last_updated[:16].replace('T', ' ')}")
+except Exception:
+    pass
+
 # ─── Search / query input ────────────────────────────────────────
 col1, col2 = st.columns([3, 1])
 with col1:
