@@ -326,6 +326,11 @@ class GoogleCustomSearchFetcher(ProductFetcher):
         "snapdeal": "snapdeal.com",
         "shopclues": "shopclues.com",
         "limeroad": "limeroad.com",
+        "shopsy": "shopsy.in",
+        "oppo": "oppo.com",
+        "realme": "realme.com",
+        "boat": "boat-lifestyle.com",
+        "dotandkey": "dotandkey.com",
     }
 
     def search(self, q: SearchQuery) -> List[Product]:
@@ -1555,6 +1560,334 @@ class PlaywrightScraperFetcher(ProductFetcher):
                     print(f"[Playwright limeroad] error: {e}")
                 ctx.close()
 
+            # Shopsy (Flipkart's social commerce platform)
+            if "shopsy" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    results.extend(self._scrape_site(
+                        page,
+                        f"https://www.shopsy.in/search?q={kw}",
+                        {
+                            "base_url": "https://www.shopsy.in",
+                            "container": "._1AtVbE, ._2kHMtA, .CXW8mj",
+                            "alt_containers": ["._1fQZEK", "._1xHGtK", "._4ddWXP"],
+                            "title": "._4rR01T, .s1Q9rs, .IRpwTa",
+                            "link": "a",
+                            "price": "._30jeq3, ._8VNy32, .Nx9bqj",
+                            "mrp": "._3I9_wc, ._3Ay6Sb",
+                            "image": "img",
+                        },
+                        "shopsy",
+                        q,
+                    ))
+                except Exception as e:
+                    print(f"[Playwright shopsy] error: {e}")
+                ctx.close()
+
+            # OPPO India (D2C brand site)
+            if "oppo" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    page.goto("https://www.oppo.com/in/smartphones/", wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(8000)
+                    
+                    # OPPO page structure: look for divs/spans containing both model name and price
+                    # Try common product container patterns
+                    containers = page.query_selector_all(".product-card, .product-item, .goods-item, .phone-item, .model-card, div[class*='product']")
+                    if not containers:
+                        # Fallback: look for any elements with both OPPO model and ₹
+                        all_divs = page.query_selector_all("div, span, p")
+                        seen = set()
+                        for elem in all_divs:
+                            try:
+                                text = elem.inner_text().strip()
+                                if text in seen or len(text) < 20 or len(text) > 300:
+                                    continue
+                                seen.add(text)
+                                
+                                if re.search(r'OPPO|Find\s+\w+|Reno\s+\w+', text, re.I) and "₹" in text:
+                                    prices = re.findall(r'[₹]\s*([\d,]+)', text)
+                                    if len(prices) >= 1:
+                                        price = float(prices[0].replace(",", ""))
+                                        mrp = float(prices[1].replace(",", "")) if len(prices) > 1 else price * 1.3
+                                        
+                                        # Extract title
+                                        title = text[:text.find("₹")].strip() if "₹" in text else text
+                                        title = re.sub(r'\s+', ' ', title).strip()
+                                        # Truncate to reasonable length
+                                        title = title[:80]
+                                        
+                                        link_el = elem.query_selector("a")
+                                        href = link_el.get_attribute("href") if link_el else "https://www.oppo.com/in/smartphones/"
+                                        if not href.startswith("http"):
+                                            href = "https://www.oppo.com/in" + href
+                                        
+                                        img = ""
+                                        img_el = elem.query_selector("img")
+                                        if img_el:
+                                            img = img_el.get_attribute("src") or ""
+                                        
+                                        if title and len(title) > 5 and price > 0:
+                                            p = Product(
+                                                source="oppo",
+                                                title=title,
+                                                url=href,
+                                                image=img,
+                                                price=price,
+                                                mrp=mrp,
+                                                rating=None,
+                                                reviews=None,
+                                                category=q.category,
+                                                brand="OPPO",
+                                            )
+                                            if p.discount_pct >= q.min_discount:
+                                                results.append(p)
+                            except Exception:
+                                continue
+                    else:
+                        for container in containers[:12]:
+                            try:
+                                text = container.inner_text().strip()
+                                prices = re.findall(r'[₹]\s*([\d,]+)', text)
+                                if len(prices) >= 1:
+                                    price = float(prices[0].replace(",", ""))
+                                    mrp = float(prices[1].replace(",", "")) if len(prices) > 1 else price * 1.3
+                                    
+                                    title = text[:text.find("₹")].strip() if "₹" in text else text
+                                    title = re.sub(r'\s+', ' ', title).strip()[:80]
+                                    
+                                    link_el = container.query_selector("a")
+                                    href = link_el.get_attribute("href") if link_el else ""
+                                    if href and not href.startswith("http"):
+                                        href = "https://www.oppo.com/in" + href
+                                    
+                                    img = ""
+                                    img_el = container.query_selector("img")
+                                    if img_el:
+                                        img = img_el.get_attribute("src") or ""
+                                    
+                                    if title and len(title) > 5 and price > 0:
+                                        p = Product(
+                                            source="oppo",
+                                            title=title,
+                                            url=href,
+                                            image=img,
+                                            price=price,
+                                            mrp=mrp,
+                                            rating=None,
+                                            reviews=None,
+                                            category=q.category,
+                                            brand="OPPO",
+                                        )
+                                        if p.discount_pct >= q.min_discount:
+                                            results.append(p)
+                            except Exception:
+                                continue
+                except Exception as e:
+                    print(f"[Playwright oppo] error: {e}")
+                ctx.close()
+
+            # realme India (D2C brand site)
+            if "realme" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    page.goto("https://www.realme.com/in/", wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(5000)
+                    
+                    # realme products: links have title, prices in parent/sibling
+                    links = page.query_selector_all("a[href*='/realme-']")
+                    for link in links[:12]:
+                        try:
+                            text = link.inner_text().strip()
+                            href = link.get_attribute("href") or ""
+                            
+                            # Clean title (remove NEW prefix)
+                            title = re.sub(r'^(NEW)', '', text).strip()
+                            if not title or len(title) < 5:
+                                continue
+                            
+                            # Look for prices in parent container
+                            parent = link.query_selector("xpath=..")
+                            price_text = ""
+                            if parent:
+                                price_text = parent.inner_text().strip()
+                            
+                            prices = re.findall(r'[₹]\s*([\d,]+)', price_text)
+                            if len(prices) >= 2:
+                                price = float(prices[0].replace(",", ""))
+                                mrp = float(prices[1].replace(",", ""))
+                            elif len(prices) == 1:
+                                price = float(prices[0].replace(",", ""))
+                                mrp = price * 1.5
+                            else:
+                                # No prices found, skip
+                                continue
+                            
+                            if not href.startswith("http"):
+                                href = "https://www.realme.com/in" + href
+                            
+                            img = ""
+                            img_el = link.query_selector("img")
+                            if img_el:
+                                img = img_el.get_attribute("src") or ""
+                            
+                            if title and price > 0:
+                                p = Product(
+                                    source="realme",
+                                    title=title,
+                                    url=href,
+                                    image=img,
+                                    price=price,
+                                    mrp=mrp,
+                                    rating=None,
+                                    reviews=None,
+                                    category=q.category,
+                                    brand="realme",
+                                )
+                                if p.discount_pct >= q.min_discount:
+                                    results.append(p)
+                        except Exception:
+                            continue
+                except Exception as e:
+                    print(f"[Playwright realme] error: {e}")
+                ctx.close()
+
+            # boAt Lifestyle (D2C Shopify site)
+            if "boat" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    # boAt uses Shopify - use collections/all page
+                    page.goto("https://www.boat-lifestyle.com/collections/all", wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(5000)
+                    
+                    items = page.query_selector_all(".product-card")
+                    for item in items[:12]:
+                        try:
+                            link_el = item.query_selector("a")
+                            href = link_el.get_attribute("href") if link_el else ""
+                            if href and not href.startswith("http"):
+                                href = "https://www.boat-lifestyle.com" + href
+                            
+                            title_el = item.query_selector(".product-card__title, .product-title, h3")
+                            title = title_el.inner_text().strip() if title_el else ""
+                            
+                            # boAt uses "Sale price" and "Regular price" text labels
+                            price = 0.0
+                            mrp = 0.0
+                            item_text = item.inner_text().strip()
+                            prices = re.findall(r'[₹]\s*([\d,]+)', item_text)
+                            if len(prices) >= 2:
+                                price = float(prices[0].replace(",", ""))
+                                mrp = float(prices[1].replace(",", ""))
+                            elif len(prices) == 1:
+                                price = float(prices[0].replace(",", ""))
+                                mrp = price * 1.5
+                            
+                            img = ""
+                            img_el = item.query_selector("img")
+                            if img_el:
+                                img = img_el.get_attribute("src") or img_el.get_attribute("data-src") or ""
+                            
+                            if title and href and price > 0:
+                                p = Product(
+                                    source="boat",
+                                    title=title,
+                                    url=href,
+                                    image=img,
+                                    price=price,
+                                    mrp=mrp,
+                                    rating=None,
+                                    reviews=None,
+                                    category=q.category,
+                                    brand="boAt",
+                                )
+                                if p.discount_pct >= q.min_discount:
+                                    results.append(p)
+                        except Exception:
+                            continue
+                except Exception as e:
+                    print(f"[Playwright boat] error: {e}")
+                ctx.close()
+
+            # Dot&Key (D2C Shopify site)
+            if "dotandkey" in q.sources:
+                ctx = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1920, "height": 1080},
+                )
+                page = ctx.new_page()
+                try:
+                    # Dot&Key uses Shopify - use collections/all
+                    page.goto("https://www.dotandkey.com/collections/all", wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(5000)
+                    
+                    items = page.query_selector_all(".product-card")
+                    for item in items[:12]:
+                        try:
+                            link_el = item.query_selector("a")
+                            href = link_el.get_attribute("href") if link_el else ""
+                            if href and not href.startswith("http"):
+                                href = "https://www.dotandkey.com" + href
+                            
+                            title_el = item.query_selector(".product-card__title, .product-title, h3")
+                            title = title_el.inner_text().strip() if title_el else ""
+                            
+                            # Extract prices from full card text
+                            price = 0.0
+                            mrp = 0.0
+                            item_text = item.inner_text().strip()
+                            prices = re.findall(r'[₹]\s*([\d,]+)', item_text)
+                            if len(prices) >= 2:
+                                price = float(prices[0].replace(",", ""))
+                                mrp = float(prices[1].replace(",", ""))
+                            elif len(prices) == 1:
+                                price = float(prices[0].replace(",", ""))
+                                mrp = price * 1.5
+                            
+                            img = ""
+                            img_el = item.query_selector("img")
+                            if img_el:
+                                img = img_el.get_attribute("src") or img_el.get_attribute("data-src") or ""
+                                if img.startswith("//"):
+                                    img = "https:" + img
+                            
+                            if title and href and price > 0:
+                                p = Product(
+                                    source="dotandkey",
+                                    title=title,
+                                    url=href,
+                                    image=img,
+                                    price=price,
+                                    mrp=mrp,
+                                    rating=None,
+                                    reviews=None,
+                                    category=q.category,
+                                    brand="Dot&Key",
+                                )
+                                if p.discount_pct >= q.min_discount:
+                                    results.append(p)
+                        except Exception:
+                            continue
+                except Exception as e:
+                    print(f"[Playwright dotandkey] error: {e}")
+                ctx.close()
+
             browser.close()
         return results
 
@@ -1575,6 +1908,11 @@ def build_fetchers() -> List[ProductFetcher]:
         fetchers.append(MockFetcher("snapdeal", "https://www.snapdeal.com"))
         fetchers.append(MockFetcher("shopclues", "https://www.shopclues.com"))
         fetchers.append(MockFetcher("limeroad", "https://www.limeroad.com"))
+        fetchers.append(MockFetcher("shopsy", "https://www.shopsy.in"))
+        fetchers.append(MockFetcher("oppo", "https://www.oppo.com/in"))
+        fetchers.append(MockFetcher("realme", "https://www.realme.com/in"))
+        fetchers.append(MockFetcher("boat", "https://www.boat-lifestyle.com"))
+        fetchers.append(MockFetcher("dotandkey", "https://www.dotandkey.com"))
         return fetchers
 
     if source == "free":
